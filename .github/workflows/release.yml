@@ -1,0 +1,57 @@
+name: Release tests
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+        default: '0.0'
+      devel_name:
+        description: 'Developer Name'
+        required: true
+        default: 'Avocado Developer'
+      devel_mail:
+        description: 'Developer mail'
+        required: true
+        default: 'avocado@redhat.com'
+
+
+jobs:
+
+  release:
+    name: Release test pipeline
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:34
+
+    steps:
+      - name: install required packages
+        run:  dnf -y install rpmdevtools git
+      - uses: actions/checkout@v2
+        with:
+          persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal access token.
+          fetch-depth: 0
+      - name: Update VERSION file
+        run: |
+          echo ${{ github.event.inputs.version }} > VERSION
+      - name: Set variables
+        run: echo "date=`git log --pretty='format:%cd' --date='format:%Y%m%d' -n 1`" >> $GITHUB_ENV
+      - name: Update avocado-plugins-vt.spec
+        run: |
+          rpmdev-bumpspec -n ${{ github.event.inputs.version }} -u "${{ github.event.inputs.devel_name }} <${{ github.event.inputs.devel_mail }}>" -c "New release" avocado-plugins-vt.spec
+          sed -i 's/^Release:.*/Release: 1%{?gitrel}%{?dist}/' avocado-plugins-vt.spec
+          sed -i 's/%global commit_date .*/%global commit_date ${{ env.date }}/' avocado-plugins-vt.spec
+          sed -i 's/%global commit      .*/%global commit      ${{ github.sha }}/' avocado-plugins-vt.spec
+      - name: Commit files
+        run: |
+          git config --local user.email "${{ github.event.inputs.devel_mail }}"
+          git config --local user.name "${{ github.event.inputs.devel_name }}"
+          git commit -m "Changes for release ${{ github.event.inputs.version }}" -a
+      - name: Tag test version
+        run: git tag ${{ github.event.inputs.version }} -m 'Release ${{ github.event.inputs.version }}'
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.RELEASE_TOKEN }}
+          branch: release-${{ github.event.inputs.version }}
+
